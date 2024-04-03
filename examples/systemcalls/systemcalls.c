@@ -16,8 +16,15 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
-
-    return true;
+    int result;
+    int bool_result = false;
+    result = system(cmd);
+    if (result == 0){
+        bool_result = true;
+    } else {
+        bool_result = false;
+    }
+    return bool_result;
 }
 
 /**
@@ -40,14 +47,17 @@ bool do_exec(int count, ...)
     va_start(args, count);
     char * command[count+1];
     int i;
+	int status;
+	pid_t my_pid;   
+    bool result = false; 
+    int execv_ret;
+
     for(i=0; i<count; i++)
     {
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
+
 
 /*
  * TODO:
@@ -59,9 +69,35 @@ bool do_exec(int count, ...)
  *
 */
 
-    va_end(args);
+	my_pid = fork ();
+	if (my_pid == -1){
+        printf("Error while forking the process\n");
+    }
 
-    return true;
+
+	if (my_pid == 0) {
+		execv_ret = execv (command[0], command);
+		if (execv_ret == -1) {
+			printf("Error while running execv\n");
+			exit (EXIT_FAILURE);
+		}
+	}
+
+	my_pid = waitpid (my_pid, &status, 0);
+	if (my_pid == -1) {
+        printf("wait");
+    }
+		
+	va_end(args);
+
+	if (status == 0) {
+		result = true;
+    }
+	else {
+		result = false;
+    }
+    
+    return result;
 }
 
 /**
@@ -80,10 +116,6 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
-
 
 /*
  * TODO
@@ -93,7 +125,45 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *
 */
 
+	int status;
+	int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    int my_pid;
+    bool result = false;
+
+	if (fd < 0) {
+		printf("Error opening file");
+		abort();
+	}
+
+    my_pid = fork();
+	switch (my_pid) {
+		case -1: 
+            printf("Error while forking process");
+            abort();
+		case 0:
+			if (dup2(fd, 1) < 0) {
+			    printf("Error duplicating file descriptor");
+			    abort();
+			}
+			close(fd);
+			execv(command[0], command);
+			abort();
+
+		default:
+			close(fd);
+	}
+
+  	my_pid = waitpid (my_pid, &status, 0);
+	if (my_pid == -1){
+    	va_end(args);
+    	if (status!=0) {
+            result = false;
+        }
+    } else {
+		result =  true;
+    }
+
     va_end(args);
 
-    return true;
+    return result;
 }
