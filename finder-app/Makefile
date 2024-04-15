@@ -1,12 +1,15 @@
-CROSS_COMPILE=
+.PHONY: all, clean
 
-CC=$(CROSS_COMPILE)gcc
+CC = $(CROSS_COMPILE)gcc
+CFLAGS = -Wall -Wextra
+SRCS = writer.c
+OBJS = $(SRCS:.c=.o)
+TARGET = writer
 
-writer: writer.o
-	$(CC) writer.o -o writer
+all: $(TARGET)
 
-writer.o: writer.c
-	$(CC) -c writer.c 
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^
 
 clean:
-	rm -f *.o writer
+	rm -f $(TARGET) $(OBJS)
