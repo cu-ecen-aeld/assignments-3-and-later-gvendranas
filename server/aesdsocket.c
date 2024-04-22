@@ -41,6 +41,7 @@ static bool read_packet(int sock, int fd)
       return false;
     } else if (num_rx_bytes == 0) {
       // End of the reception
+      syslog(LOG_ERR, "Receiving data");
       return false;
     }
 
