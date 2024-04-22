@@ -49,6 +49,7 @@ static bool read_packet(int sock, int fd)
     end_of_line = memchr(buffer, '\n', num_rx_bytes);
     if (end_of_line) {
       // truncate, keeping new line
+      syslog(LOG_ERR, "Receiving data");
       num_rx_bytes =  end_of_line - buffer + 1;
       end_of_rx = true;
     }
