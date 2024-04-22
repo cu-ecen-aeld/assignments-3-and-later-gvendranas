@@ -2,7 +2,7 @@
 
 case "$1" in
     start)
-        echo "Starting server"
+        echo "Starting aesdsocket server"
         start-stop-daemon -S --oknodo -n aesdsock -a /usr/bin/aesdsocket -- -d --verbose
         ;;
     stop)
