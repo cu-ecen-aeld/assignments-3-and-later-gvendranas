@@ -127,6 +127,8 @@ int main(int argc, char **argv)
     memset(&hints, 0, sizeof(hints));
     openlog(NULL, 0, LOG_USER);
 
+    syslog(LOG_DEBUG, "Hello!!");
+
     // Check in in puts arguments whether it has -d argument meanning it is a daemon
     for (i=1; i < argc; ++i) {
         if (!strcmp(argv[i], "-d")) {
@@ -192,6 +194,7 @@ int main(int argc, char **argv)
     
 
     while(!signal_recived) {
+        syslog(LOG_DEBUG, "Waiting!!!");
         salen = sizeof(sa);
         if ((child = accept(sock, &sa, &salen)) == -1) {
         continue;
@@ -227,15 +230,19 @@ int main(int argc, char **argv)
 
 something_failed:
     if (ai) {
+        syslog(LOG_DEBUG, "Fail A");
         freeaddrinfo(ai);
     }
     if (file_desc != -1) {
+        syslog(LOG_DEBUG, "Fail B");
         close(file_desc);
     }
     if (sock != -1) {
+        syslog(LOG_DEBUG, "Fail C");
         close(sock); 
     }
     if (child != -1) {
+        syslog(LOG_DEBUG, "Fail D");
         close (child);
     }    
     closelog();
