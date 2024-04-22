@@ -1,243 +1,154 @@
+#include <sys/socket.h>
 #include <syslog.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <stdbool.h>
-#include <signal.h>
-#include <netinet/in.h>
-#include <stdio.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <fcntl.h>
-#include <string.h>
-#include <netdb.h>
+#include <stdlib.h>
 #include <errno.h>
-#include <arpa/inet.h>
-#include <sys/stat.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <stdio.h>
 
-// Constants
-#define MAX_BUFFER 4096 // No magic numbers in the code
+static const char data_file_path[] = "/var/tmp/aesdsocketdata";
+static const short port_number = 9000;
+static const size_t buf_size = 64;
 
-// Global variables
-static bool signal_recived = false;
+static char do_run = 1;
 
-static bool read_packet(int sock, int fd)
-{
-  char buffer[MAX_BUFFER];
-  bool end_of_rx = false;
-  ssize_t num_rx_bytes = 0;
-  char *end_of_line = NULL;
-  off_t start_offset = lseek(fd, 0, SEEK_END);
-
-  while (!end_of_rx && !signal_recived) {
-
-    // Revicing data
-    num_rx_bytes = recv(sock, buffer, sizeof(buffer), 0);
-
-    // Checking data reception result
-    if (num_rx_bytes == -1) {
-      syslog(LOG_ERR, "Error in recv!: %s", strerror(errno));
-      return false;
-    } else if (num_rx_bytes == 0) {
-      // End of the reception
-      syslog(LOG_ERR, "Receiving data");
-      return false;
-    }
-
-    // Looking for EOL in the received buffer
-    end_of_line = memchr(buffer, '\n', num_rx_bytes);
-    if (end_of_line) {
-      // truncate, keeping new line
-      syslog(LOG_ERR, "Receiving data");
-      num_rx_bytes =  end_of_line - buffer + 1;
-      end_of_rx = true;
-    }
-
-    // Write data in the file descriptor as requested in the exercice
-    if (write(fd, buffer, num_rx_bytes) == -1) {
-      ftruncate(fd, start_offset);
-      return false;
-    }
-  }
-
-  if (signal_recived) {
-    return false;
-  }
-
-  return true;
+static void signal_handler(int signo) {
+    do_run = 0;   
 }
 
-static void send_response(int sock, int fd)
-{
-    ssize_t numbytes = 0;
-    char buffer[MAX_BUFFER];
-
-    // Setting file descriptor in 0
-    if ((lseek(fd, 0, SEEK_SET)) == -1) 
-    {
-        return;
-    }
-
-    while (!signal_recived) 
-    {
-        numbytes = read(fd, buffer, sizeof(buffer));
-        if (numbytes == 0) 
-        {
-            // No data read
-            return;
-        } else if (numbytes == -1) 
-        {
-            // Some issue reading file descriptor
-            syslog(LOG_ERR, "Could not read!: %s", strerror(errno));
-            return;
-        }
-        // Writing data
-        if (send(sock, buffer, numbytes, 0) == -1) 
-        {
-            // Some issue sending data
-            syslog(LOG_ERR, "Could not write!: %s", strerror(errno));
-            return;
-        }
-    }
+static void syslog_then_exit(const char* const reason) {
+    const int enr = errno;
+    syslog(LOG_ERR, "aesdsocket aborting. function=%s errno=%s", reason, strerror(enr));
+    exit(-1);
+    
 }
 
-static void signal_handler(int x)
-{
-  signal_recived = true;
-}
-
-int main(int argc, char **argv)
-{
-    int i = 0;
-    int sock = -1;
-    int rc = 0;
-    int child = -1;
-    int retval = -1;
-    socklen_t salen;
-    int file_desc = -1;
-    char ipaddr[40];
-    struct sigaction sigact;
-    int val=1;    
-    struct sockaddr sa;
-    bool it_is_a_daemon = false;
-    struct addrinfo *ai = NULL;
-    struct addrinfo hints;
-
-    memset(&hints, 0, sizeof(hints));
+int main(int argc, char* argv[]) {
     openlog(NULL, 0, LOG_USER);
 
-    // Check in in puts arguments whether it has -d argument meanning it is a daemon
-    for (i=1; i < argc; ++i) {
-        if (!strcmp(argv[i], "-d")) {
-            it_is_a_daemon = true;
-        }
+    struct sigaction action = {};
+    action.sa_handler = &signal_handler;
+
+    if (sigaction(SIGINT, &action, NULL) != 0) {
+        syslog_then_exit("sigaction");
+    }
+    if (sigaction(SIGTERM, &action, NULL) != 0) {
+        syslog_then_exit("sigaction");
     }
 
-    // Getting a socket
-    if ((sock = socket(PF_INET, SOCK_STREAM, 0)) == -1) {
-        syslog(LOG_ERR, "Error opening file!: %s", strerror(errno));
-        goto something_failed;
+    const int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock_fd < 0) {
+        syslog_then_exit("socket");
     }
 
-    // Configure socket options
-    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) == -1) {
-        syslog(LOG_ERR, "Error in setsockopt!: %s", strerror(errno));
-        goto something_failed;
+    const int enable = 1;
+    if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0) {
+        syslog_then_exit("setsockopt");
     }
-
-    hints.ai_flags = AI_PASSIVE;
-    hints.ai_family = PF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    if ((rc = getaddrinfo(NULL, "9000", &hints, &ai)) != 0) {
-        goto something_failed;
-    }
-    if (!ai) {
-        goto something_failed;
-    }
-    if (bind(sock, ai->ai_addr, ai->ai_addrlen) == -1) {
-        goto something_failed;
-    }
-
-    // Let0s do what a Daemon need to be so
-    if (it_is_a_daemon) {
-        pid_t childpid = fork();
-        if (childpid != 0) {
-        // quit parent
-        _exit(0);
-        }
-        setsid();
-        chdir("/");
-        if ((freopen("/dev/null", "r", stdin) == NULL) || (freopen("/dev/null", "w", stdout) == NULL) || (freopen("/dev/null", "r", stderr) == NULL)) {
-            goto something_failed;
-        }
-    }
-
-    // Opening the file descriptor
-    file_desc = open("/var/tmp/aesdsocketdata", O_CREAT | O_TRUNC | O_RDWR, 0644);
-    if (file_desc == -1) {
-        goto something_failed;
-    }
-
-    // Listening the file descriptor
-    if (listen(sock, 10) == -1) {
-        goto something_failed;
-    }
-
-    // Fill sigact with zeros
-    memset(&sigact, 0, sizeof(sigact));
-    sigact.sa_handler = signal_handler;
-    sigaction(SIGTERM, &sigact, NULL);
-    sigaction(SIGINT, &sigact, NULL);
     
+    struct sockaddr_in local;
+    local.sin_family = AF_INET;
+    local.sin_port = htons(port_number);
+    inet_aton("0.0.0.0", (struct in_addr*) &local.sin_addr.s_addr);
+    
+    if (bind(sock_fd, (struct sockaddr*) &local, sizeof(local)) < 0) {
+        syslog_then_exit("bind");
+    }
 
-    while(!signal_recived) {
-        salen = sizeof(sa);
-        if ((child = accept(sock, &sa, &salen)) == -1) {
-        continue;
-        }
-
-        if (inet_ntop(AF_INET, &((struct sockaddr_in *)&sa)->sin_addr, ipaddr, sizeof(ipaddr)) == NULL) {
-            strncpy(ipaddr, "???", sizeof(ipaddr));
-        }
-
-        if (!read_packet(child, file_desc)) {
+    if ((argc > 1) && (strcmp(argv[1],"-d") == 0)) {
+        const pid_t pid = fork();
+        if (pid == 0) {
+            if (!((setsid() > 0) && !close(STDIN_FILENO) && !close(STDOUT_FILENO) && !close(STDERR_FILENO))) {
+                syslog_then_exit("fork");
+            }
         } else {
-            send_response(child, file_desc);
+            exit(EXIT_SUCCESS);
+        }
+    }
+
+    if (listen(sock_fd, 1) < 0) {
+        syslog_then_exit("listen");
+    }
+
+    struct sockaddr_in remote = {};
+    socklen_t len = sizeof(remote);
+
+    while (do_run) {
+        const int client_fd = accept(sock_fd, (struct sockaddr*) &remote, &len);
+        if (client_fd < 0) {
+            if (!do_run) {
+                break;
+            } 
+            syslog_then_exit("accept");
         }
 
-        close(child);
-        child = -1;
-        // Per specs
-        syslog(LOG_DEBUG, "Closed connection from %s", ipaddr);
-    }
+        char str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &remote.sin_addr, str, INET_ADDRSTRLEN);
+        syslog(LOG_INFO, "Accepted connection from %s", str);
 
-    if (signal_recived) {
-        syslog(LOG_ERR, "Signal received");
-    }
+        const int file_fd = open(data_file_path, O_CREAT | O_RDWR | O_APPEND, 0644);
+        if (file_fd < 0) {
+            syslog_then_exit("open");
+        }
 
-    if (child != -1) {
-        close(child);
-        child = -1;
-        // Per specs
-        syslog(LOG_DEBUG, "Closed connection from %s", ipaddr);
-    }
+        while (1) {
+            char buf[buf_size]; 
 
-  retval = 0;
+            const ssize_t recv_len = recv(client_fd, buf, sizeof(buf), 0);
+            if (recv_len <= 0) {
+                close(client_fd);
+                break;
+            }
 
-something_failed:
-    if (ai) {
-        freeaddrinfo(ai);
+            size_t write_len = 0;
+            char found = 0;
+            for (; write_len < recv_len; write_len++) {
+                if (buf[write_len] == '\n') {
+                    write_len += 1;
+                    found = 1;
+                    break;
+                }
+            }
+
+            if (write(file_fd, buf, write_len) < 0) {
+                syslog_then_exit("write");
+            }
+
+            if (found) {
+                const int data_fd = open(data_file_path, O_RDONLY, 0);
+                if (data_fd < 0) {
+                    syslog_then_exit("open_read");
+                }
+                while (1) {
+                    const ssize_t read_len = read(data_fd, buf, sizeof(buf));
+                    if (read_len < 0) {
+                        syslog_then_exit("read");
+                    }
+                    if (read_len == 0) {
+                        break;
+                    }
+
+                    const ssize_t send_len = send(client_fd, buf, read_len, 0);
+                    if (send_len != read_len) {
+                        syslog_then_exit("send");
+                    }
+                }
+                close(data_fd);
+            }
+        }
+        
+        syslog(LOG_INFO, "Closed connection from %s", str);
     }
-    if (file_desc != -1) {
-        close(file_desc);
-    }
-    if (sock != -1) {
-        close(sock); 
-    }
-    if (child != -1) {
-        close (child);
-    }    
-    closelog();
-    return retval;
+    
+    close(sock_fd);
+
+    unlink(data_file_path);
+
+    syslog(LOG_INFO, "Caught signal, exiting");
+
+    return 0;
 }
