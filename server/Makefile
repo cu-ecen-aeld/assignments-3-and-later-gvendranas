@@ -1,9 +1,11 @@
-# Compipile it all
-all: aesdsocket
-# Creating clean command
-.PHONY: clean
+ifdef CROSS_COMPILE
+	CC=$(CROSS_COMPILE)gcc
+endif
+
+CFLAGS += -Wall -Werror
+
+all:
+	$(CC) -o aesdsocket aesdsocket.c
+
 clean:
-	rm -rf aesdsocket *.o
-# Creating application
-aesdsocket: aesdsocket.c
-	$(CC) -Wall -Werror -g aesdsocket.c -o aesdsocket 
+	rm -f aesdsocket
